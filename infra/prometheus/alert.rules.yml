@@ -1,0 +1,37 @@
+groups:
+  - name: waint
+    rules:
+      - alert: HighInboundLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{handler="/internal/wa/inbound"}[5m])) by (le)) > 6
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "WhatsApp reply p95 latency > 6s"
+
+      - alert: ReminderQueueLag
+        expr: waint_reminder_oldest_due_seconds > 120
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Reminders firing late (oldest due > 2m)"
+
+      - alert: OllamaErrors
+        expr: rate(waint_ollama_errors_total[5m]) / rate(waint_ollama_requests_total[5m]) > 0.05
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ollama error rate > 5% (template fallback engaged)"
+
+      - alert: WhatsAppGatewayDown
+        expr: up{job="whatsapp-gateway"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "WhatsApp gateway down / re-auth required"
+
+      - alert: PostgresConnectionsHigh
+        expr: pg_stat_activity_count / pg_settings_max_connections > 0.8
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Postgres connections > 80%"

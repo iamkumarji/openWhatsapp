@@ -1,0 +1,210 @@
+name: waint
+
+x-backend-env: &backend-env
+  ENV: ${ENV:-development}
+  SECRET_KEY: ${SECRET_KEY}
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+  DATABASE_URL: ${DATABASE_URL}
+  REDIS_URL: ${REDIS_URL}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND}
+  OLLAMA_URL: ${OLLAMA_URL}
+  LLM_INTENT_MODEL: ${LLM_INTENT_MODEL}
+  LLM_RENDER_MODEL: ${LLM_RENDER_MODEL}
+  LLM_EMBED_MODEL: ${LLM_EMBED_MODEL}
+  OIDC_JWKS_URL: ${OIDC_JWKS_URL}
+  KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+  KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  JIRA_BASE_URL: ${JIRA_BASE_URL}
+  JIRA_EMAIL: ${JIRA_EMAIL}
+  JIRA_API_TOKEN: ${JIRA_API_TOKEN}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docs/02-database-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [internal]
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollamadata:/root/.ollama
+    # Uncomment for GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks: [internal]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: ["start", "--proxy-headers", "xforwarded", "--hostname-strict=false", "--http-enabled=true"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME_PATH: /auth
+      KC_HTTP_RELATIVE_PATH: /auth
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [internal]
+
+  backend:
+    build: ./services/backend
+    environment: *backend-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      ollama: { condition: service_started }
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  worker:
+    build: ./services/backend
+    environment: *backend-env
+    depends_on:
+      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+    networks: [internal]
+
+  beat:
+    build: ./services/backend
+    environment: *backend-env
+    depends_on:
+      redis: { condition: service_healthy }
+    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info"]
+    networks: [internal]
+
+  whatsapp-gateway:
+    build: ./services/whatsapp-gateway
+    environment:
+      WA_BACKEND_INBOUND_URL: ${WA_BACKEND_INBOUND_URL}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      WA_SESSION_PATH: ${WA_SESSION_PATH:-/data/wa-session}
+      PORT: "3000"
+    volumes:
+      - wadata:/data
+    depends_on:
+      backend: { condition: service_healthy }
+    networks: [internal]
+
+  frontend:
+    build: ./services/frontend
+    environment:
+      NEXT_PUBLIC_API_BASE: ${PUBLIC_BASE_URL}/api/v1
+      NEXT_PUBLIC_KEYCLOAK_URL: ${KEYCLOAK_URL}
+      NEXT_PUBLIC_KEYCLOAK_REALM: ${KEYCLOAK_REALM}
+      NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: waint-portal
+    depends_on:
+      backend: { condition: service_healthy }
+    networks: [internal]
+
+  n8n:
+    image: n8nio/n8n:latest
+    environment:
+      N8N_PATH: /n8n
+      N8N_PROXY_HOPS: "1"
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [internal]
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+    depends_on: [backend, frontend, keycloak]
+    networks: [internal]
+
+  # ---------- observability ----------
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    networks: [internal]
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SERVER_ROOT_URL: ${PUBLIC_BASE_URL}/grafana
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    depends_on: [prometheus, loki]
+    networks: [internal]
+
+  loki:
+    image: grafana/loki:latest
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./infra/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - lokidata:/loki
+    networks: [internal]
+
+  promtail:
+    image: grafana/promtail:latest
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    volumes:
+      - ./infra/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [internal]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  pgdata: {}
+  redisdata: {}
+  ollamadata: {}
+  wadata: {}
+  promdata: {}
+  grafanadata: {}
+  lokidata: {}

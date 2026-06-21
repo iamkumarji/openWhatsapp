@@ -15,8 +15,10 @@ Return ONLY a JSON object, no prose, matching this schema:
 Rules:
 - Resolve relative time using NOW={now_iso} and TIMEZONE={tz}. Output absolute
   ISO-8601 UTC strings in entities when a time is implied.
-- For reminders extract entities.body (the action text), entities.when (ISO-8601 UTC),
-  entities.recurrence (an RFC-5545 RRULE string or null).
+- For reminders extract entities.body (the action text) and entities.when_text
+  (the time phrase EXACTLY as the user said it, e.g. "in 1 hour", "tomorrow at 10am",
+  "next Monday 9am"). Do NOT compute a timestamp yourself. Also entities.recurrence
+  (an RFC-5545 RRULE string or null).
 - For task lookups extract optional entities.status, entities.priority, entities.overdue.
 - Never invent task IDs or names. If a referenced task is ambiguous set
   intent=task_status and entities.task_ref to the literal text.
@@ -24,8 +26,9 @@ Rules:
 
 Examples:
 User: "What do I have today?" -> {{"intent":"daily_schedule","entities":{{"date":"{today}"}},"confidence":0.97}}
-User: "Remind me in 1 hour to call Rajesh" -> {{"intent":"create_reminder","entities":{{"body":"call Rajesh","when":"<now+1h ISO>","recurrence":null}},"confidence":0.96}}
-User: "Remind me every Monday at 9am for standup" -> {{"intent":"create_reminder","entities":{{"body":"standup","when":"<next Monday 09:00 ISO>","recurrence":"FREQ=WEEKLY;BYDAY=MO"}},"confidence":0.94}}
+User: "Remind me in 1 hour to call Rajesh" -> {{"intent":"create_reminder","entities":{{"body":"call Rajesh","when_text":"in 1 hour","recurrence":null}},"confidence":0.96}}
+User: "Remind me tomorrow at 10am to review the proposal" -> {{"intent":"create_reminder","entities":{{"body":"review the proposal","when_text":"tomorrow at 10am","recurrence":null}},"confidence":0.95}}
+User: "Remind me every Monday at 9am for standup" -> {{"intent":"create_reminder","entities":{{"body":"standup","when_text":"next Monday 9am","recurrence":"FREQ=WEEKLY;BYDAY=MO"}},"confidence":0.94}}
 User: "Show all overdue tasks" -> {{"intent":"task_lookup","entities":{{"overdue":true}},"confidence":0.95}}
 User: "What is my next meeting?" -> {{"intent":"next_meeting","entities":{{}},"confidence":0.96}}
 """

@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 
 import redis.asyncio as aioredis
-from fastapi import FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
+from fastapi import FastAPI, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 
 from app.api.routes import dashboard, internal_wa, reminders, tasks
@@ -22,8 +22,10 @@ app.include_router(tasks.router)
 app.include_router(reminders.router)
 app.include_router(dashboard.router)
 
-# Prometheus /metrics
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+# Prometheus /metrics (lightweight; avoids middleware incompatibilities)
+@app.get("/metrics")
+async def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/healthz")

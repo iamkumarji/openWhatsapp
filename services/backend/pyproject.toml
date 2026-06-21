@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
+    "psycopg2-binary>=2.9",            # sync driver for Celery workers
     "alembic>=1.13",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
@@ -18,7 +19,7 @@ dependencies = [
     "cryptography>=43.0",               # AES-GCM for oauth tokens
     "python-dateutil>=2.9",            # NL/relative time + RRULE
     "dateparser>=1.2",                 # "in 1 hour", "tomorrow 10am"
-    "prometheus-fastapi-instrumentator>=7.0",
+    "prometheus-client>=0.20",
     "structlog>=24.4",
 ]
 

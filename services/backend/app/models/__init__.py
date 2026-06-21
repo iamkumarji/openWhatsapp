@@ -68,7 +68,11 @@ class User(Base):
     whatsapp_number: Mapped[str | None] = mapped_column(String, unique=True)
     team_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("teams.id"))
     role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id"))
-    status: Mapped[str] = mapped_column(String, default="invited")
+    status: Mapped[str] = mapped_column(
+        Enum("active", "invited", "suspended", "deleted", name="user_status",
+             create_type=False, native_enum=True),
+        default="invited",
+    )
     timezone: Mapped[str] = mapped_column(String, default="Asia/Kolkata")
     locale: Mapped[str] = mapped_column(String, default="en")
     jira_account_id: Mapped[str | None] = mapped_column(String)
@@ -123,7 +127,11 @@ class Reminder(Base):
     status: Mapped[ReminderStatus] = mapped_column(
         Enum(ReminderStatus, name="reminder_status"), default=ReminderStatus.scheduled
     )
-    channel: Mapped[str] = mapped_column(String, default="whatsapp")
+    channel: Mapped[str] = mapped_column(
+        Enum("whatsapp", "portal", "email", name="notif_channel",
+             create_type=False, native_enum=True),
+        default="whatsapp",
+    )
     task_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tasks.id"))
     meeting_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("meetings.id"))
     last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -135,7 +143,11 @@ class Meeting(Base):
     __tablename__ = "meetings"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    source: Mapped[str] = mapped_column(String, default="internal")
+    source: Mapped[str] = mapped_column(
+        Enum("internal", "zoom", "google", "outlook", name="meeting_source",
+             create_type=False, native_enum=True),
+        default="internal",
+    )
     external_id: Mapped[str | None] = mapped_column(String)
     title: Mapped[str] = mapped_column(String)
     organizer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
@@ -150,7 +162,10 @@ class MessageLog(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     wa_id: Mapped[str | None] = mapped_column(String)
-    direction: Mapped[str] = mapped_column(String)
+    # DB column is the native PG enum msg_direction; bind as that type (not VARCHAR)
+    direction: Mapped[str] = mapped_column(
+        Enum("inbound", "outbound", name="msg_direction", create_type=False, native_enum=True)
+    )
     body: Mapped[str | None] = mapped_column(Text)
     intent: Mapped[str | None] = mapped_column(String)
     entities: Mapped[dict | None] = mapped_column(JSONB)

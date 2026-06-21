@@ -52,7 +52,14 @@ async def handle_inbound(db: AsyncSession, user: User, text: str, context: str =
                          "*\"What do I have today?\"* or *\"Remind me in 1 hour to call Rajesh\"*.", started)
 
     # ---- 2/3/4. tool routing + user-scoped data fetch ----
+    entities["_raw_text"] = text  # deterministic fallback for time/NL parsing in services
     data = await _route(db, user, intent, entities)
+
+    # Writes + empty reads: answer deterministically so a small model can't
+    # hallucinate items or garble exact times/dates.
+    det = _deterministic_reply(intent, data, user)
+    if det is not None:
+        return _finalize(intent, entities, det, started)
 
     # ---- 5. response rendering (with deterministic fallback) ----
     try:
@@ -99,6 +106,42 @@ async def _route(db: AsyncSession, user: User, intent: str, entities: dict) -> d
             return {"help": True}
         case _:
             return {}
+
+
+def _fmt_local(iso: str, tz: str) -> str:
+    from zoneinfo import ZoneInfo
+    dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone(ZoneInfo(tz))
+    return dt.strftime("%a %d %b, %I:%M %p")
+
+
+def _deterministic_reply(intent: str, data: dict, user) -> str | None:
+    """Reply deterministically for writes and empty reads (no LLM, no hallucination)."""
+    # --- writes ---
+    if intent == "create_reminder":
+        if data.get("created"):
+            when = _fmt_local(data["fire_at"], user.timezone)
+            tail = " (repeating)" if data.get("recurring") else ""
+            return f"👍 Reminder set for *{when}*{tail}: {data['body']}"
+        if data.get("error") == "could_not_parse_time":
+            return "I couldn't work out *when* to remind you. Try e.g. \"in 2 hours\" or \"tomorrow 9am\"."
+        if data.get("error"):
+            return "I couldn't create that reminder — please rephrase."
+    if intent == "create_task":
+        if data.get("created"):
+            due = f" (due {_fmt_local(data['due_at'], user.timezone)})" if data.get("due_at") else ""
+            return f"✅ Task created: *{data['title']}*{due}"
+        if data.get("error"):
+            return "I couldn't create that task — what's the title?"
+    # --- empty reads ---
+    if intent == "next_meeting" and not data.get("next"):
+        return "You have no upcoming meetings on your calendar. 🎉"
+    if intent in ("daily_schedule", "weekly_schedule") and not data.get("items"):
+        return "You're all clear — nothing scheduled. 🎉"
+    if intent in ("task_lookup", "meeting_lookup") and not data.get("items"):
+        return "Nothing matching found. 🎉"
+    if intent == "jira_lookup" and not data.get("count"):
+        return "No Jira issues assigned to you right now."
+    return None
 
 
 def _template_fallback(intent: str, data: dict) -> str:

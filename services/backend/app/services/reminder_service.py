@@ -36,8 +36,13 @@ async def create_nl(db: AsyncSession, user: User, entities: dict) -> dict:
     if not body:
         return {"error": "missing_body"}
 
-    when = entities.get("when")
-    fire_at = _to_dt(when) if when else parse_natural_time(entities.get("when_text", ""), user.timezone)
+    # Resolve the firing time robustly: prefer a real ISO if the model gave one,
+    # otherwise parse the natural-language phrase (deterministic, via dateparser),
+    # finally fall back to the raw user message.
+    fire_at = _to_dt(entities.get("when"))  # None if absent or a placeholder
+    for phrase in (entities.get("when_text"), entities.get("when"), entities.get("_raw_text")):
+        if fire_at is None and phrase:
+            fire_at = parse_natural_time(str(phrase), user.timezone)
     if fire_at is None:
         return {"error": "could_not_parse_time"}
 

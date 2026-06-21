@@ -16,7 +16,7 @@ async def list_for_user(db: AsyncSession, user: User, entities: dict | None = No
                 SELECT issue_key, summary, status, status_category, priority, url, due_date
                 FROM jira_issues
                 WHERE assignee_id = :uid
-                  AND (:cat IS NULL OR status_category = :cat)
+                  AND (CAST(:cat AS text) IS NULL OR status_category = :cat)
                 ORDER BY due_date NULLS LAST, jira_updated_at DESC
                 LIMIT 25
                 """

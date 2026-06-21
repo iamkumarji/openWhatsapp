@@ -12,7 +12,7 @@ class OllamaClient:
     def __init__(self, base_url: str | None = None):
         self.base_url = (base_url or settings.ollama_url).rstrip("/")
 
-    async def chat_json(self, model: str, system: str, user: str, timeout: float = 8.0) -> dict:
+    async def chat_json(self, model: str, system: str, user: str, timeout: float = 30.0) -> dict:
         """Chat completion constrained to JSON output (intent detection)."""
         payload = {
             "model": model,
@@ -30,7 +30,7 @@ class OllamaClient:
             content = resp.json()["message"]["content"]
             return json.loads(content)
 
-    async def chat_text(self, model: str, system: str, user: str, timeout: float = 12.0) -> str:
+    async def chat_text(self, model: str, system: str, user: str, timeout: float = 60.0) -> str:
         """Free-form chat completion (response rendering)."""
         payload = {
             "model": model,
